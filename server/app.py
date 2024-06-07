@@ -1,33 +1,18 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 import mysql.connector
 import os
-
 import secrets
 import smtplib
 from email.mime.text import MIMEText
-
+from config import Config
+from db import get_db_connection, close_db_connection
+from flask_bcrypt import Bcrypt
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS if necessary
-
-# Database configuration
-db_config = {
-    'user': 'roota',
-    'password': 'root',
-    'host': 'localhost',
-    'database': 'SPL',
-    'raise_on_warnings': True
-}
-
-# Connect to the database
-def get_db_connection():
-    try:
-        connection = mysql.connector.connect(**db_config)
-        return connection
-    except mysql.connector.Error as err:
-        app.logger.error("Error connecting to database: %s", str(err))
-        return None
+app.config.from_object(Config)
+CORS(app)
+bcrypt = Bcrypt(app)
 
 @app.route('/')
 def home():
@@ -37,7 +22,7 @@ def home():
 def signup():
     data = request.get_json()
     username = data['username']
-    password = data['password']  # In a real app, you should hash the password
+    password = bcrypt.generate_password_hash(data['password']).decode('utf-8')
     email = data['email']
 
     conn = get_db_connection()
@@ -50,13 +35,13 @@ def signup():
         return jsonify({"message": str(err), "status": "error"}), 500
     finally:
         cursor.close()
-        conn.close()
+        close_db_connection()
 
 @app.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
     username = data['username']
-    password = data['password']  # In a real app, you should verify hashed passwords
+    password = data['password']
 
     conn = get_db_connection()
     if not conn:
@@ -66,7 +51,7 @@ def login():
     try:
         cursor.execute("SELECT password FROM users WHERE username = %s", (username,))
         record = cursor.fetchone()
-        if record and record[0] == password:
+        if record and bcrypt.check_password_hash(record[0], password):
             return jsonify({"message": "Login successful", "status": "success"}), 200
         else:
             return jsonify({"message": "Invalid username or password", "status": "error"}), 401
@@ -75,7 +60,7 @@ def login():
         return jsonify({"message": str(err), "status": "error"}), 500
     finally:
         cursor.close()
-        conn.close()
+        close_db_connection()
 
 @app.route('/reset-password-request', methods=['POST'])
 def reset_password_request():
@@ -102,11 +87,11 @@ def reset_password_request():
         return jsonify({"message": str(err), "status": "error"}), 500
     finally:
         cursor.close()
-        conn.close()
+        close_db_connection()
 
 def send_reset_email(email, token):
     sender_email = "mahla.esa@gmail.com"
-    sender_password = "euqdtwbutkhzguxe"  # Make sure the app password is correct and has no spaces
+    sender_password = "euqdtwbutkhzguxe"  # Ensure this is correct and has no spaces
     msg = MIMEText(f"Please use this link to reset your password: http://100.25.202.2/reset-password?token={token}")
     msg['Subject'] = 'Reset Your Password'
     msg['From'] = sender_email
@@ -118,14 +103,14 @@ def send_reset_email(email, token):
             server.login(sender_email, sender_password)
             server.send_message(msg)
             print("Email sent successfully!")
-    except SMTPException as e:
+    except smtplib.SMTPException as e:
         print(f"Failed to send email: {e}")
 
 @app.route('/reset-password', methods=['POST'])
 def reset_password():
     data = request.get_json()
     token = data['token']
-    new_password = data['new_password']  # Should be hashed in production
+    new_password = bcrypt.generate_password_hash(data['new_password']).decode('utf-8')
 
     conn = get_db_connection()
     if not conn:
@@ -145,10 +130,75 @@ def reset_password():
         return jsonify({"message": str(err), "status": "error"}), 500
     finally:
         cursor.close()
-        conn.close()
+        close_db_connection()
 
+# New Routes for Profile Management
+@app.route('/profile', methods=['GET'])
+def get_profile():
+    username = request.args.get('username')
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"message": "Database connection failed", "status": "error"}), 500
 
-# Run the app
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT username, email FROM users WHERE username = %s", (username,))
+        user = cursor.fetchone()
+        if user:
+            return jsonify({"username": user[0], "email": user[1]}), 200
+        else:
+            return jsonify({"message": "User not found", "status": "error"}), 404
+    except mysql.connector.Error as err:
+        return jsonify({"message": str(err), "status": "error"}), 500
+    finally:
+        cursor.close()
+        close_db_connection()
+
+@app.route('/profile', methods=['PUT'])
+def update_profile():
+    data = request.get_json()
+    username = data['username']
+    new_email = data.get('email')
+    new_password = data.get('password')
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"message": "Database connection failed", "status": "error"}), 500
+
+    cursor = conn.cursor()
+    try:
+        if new_email:
+            cursor.execute("UPDATE users SET email = %s WHERE username = %s", (new_email, username))
+        if new_password:
+            hashed_password = bcrypt.generate_password_hash(new_password).decode('utf-8')
+            cursor.execute("UPDATE users SET password = %s WHERE username = %s", (hashed_password, username))
+        conn.commit()
+        return jsonify({"message": "Profile updated successfully", "status": "success"}), 200
+    except mysql.connector.Error as err:
+        return jsonify({"message": str(err), "status": "error"}), 500
+    finally:
+        cursor.close()
+        close_db_connection()
+
+@app.route('/profile', methods=['DELETE'])
+def delete_account():
+    username = request.args.get('username')
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"message": "Database connection failed", "status": "error"}), 500
+
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM users WHERE username = %s", (username,))
+        conn.commit()
+        return jsonify({"message": "Account deleted successfully", "status": "success"}), 200
+    except mysql.connector.Error as err:
+        return jsonify({"message": str(err), "status": "error"}), 500
+    finally:
+        cursor.close()
+        close_db_connection()
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5005)
 
