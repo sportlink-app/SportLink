@@ -1,42 +1,44 @@
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+@font-face {
+    font-family: 'Sofia Pro';
+    src: url('/font/SofiaProBold-Italic.ttf') format('truetype');
+    font-weight: bold;
+    font-style: italic;
+}
+  
+@font-face {
+    font-family: 'Sofia Pro';
+    src: url('/font/SofiaProMedium.ttf') format('truetype');
+    font-weight: 500; /* Medium weight */
+    font-style: normal;
+}
+  
+@font-face {
+    font-family: 'Sofia Pro';
+    src: url('/font/SofiaProLight.ttf') format('truetype');
+    font-style: normal;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
+*{
+    font-family: 'Sofia Pro' !important;
 }
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
+html{
+    @apply scroll-smooth ;
 }
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+/* light button */
+.light span{
+   @apply text-green
 }
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+/* scroll to top button */
+.ant-float-btn-body{
+    @apply bg-gradient-to-r from-cyan to-green !important;
+}
+.anticon-vertical-align-top{
+    @apply text-white !important
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
-}
-
-.card {
-  padding: 2em;
-}
-
-.read-the-docs {
-  color: #888;
+/* Input */
+:where(.css-dev-only-do-not-override-17seli4).ant-input-outlined:hover, :where(.css-dev-only-do-not-override-17seli4).ant-input-outlined:focus, 
+:where(.css-dev-only-do-not-override-17seli4).ant-input-outlined:focus-within {
+    @apply border-green !important
 }
