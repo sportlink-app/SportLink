@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 import mysql.connector
 import os
@@ -8,7 +8,6 @@ from email.mime.text import MIMEText
 from config import Config
 from db import get_db_connection, close_db_connection
 from flask_bcrypt import Bcrypt
-import json
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -29,17 +28,6 @@ def signup():
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        # Check if the username is already in use
-        cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
-        if cursor.fetchone():
-            return jsonify({"message": "Username already in use", "status": "error"}), 400
-
-        # Check if the email is already in use
-        cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
-        if cursor.fetchone():
-            return jsonify({"message": "Email already in use", "status": "error"}), 400
-
-        # Insert the new user
         cursor.execute("INSERT INTO users (username, password, email) VALUES (%s, %s, %s)", (username, password, email))
         conn.commit()
         return jsonify({"message": "User created successfully", "status": "success"}), 201
@@ -47,12 +35,12 @@ def signup():
         return jsonify({"message": str(err), "status": "error"}), 500
     finally:
         cursor.close()
-        close_db_connection(conn)
+        close_db_connection()
 
 @app.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
-    email = data['email']
+    username = data['username']
     password = data['password']
 
     conn = get_db_connection()
@@ -61,18 +49,18 @@ def login():
 
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT password FROM users WHERE email = %s", (email,))
+        cursor.execute("SELECT password FROM users WHERE username = %s", (username,))
         record = cursor.fetchone()
         if record and bcrypt.check_password_hash(record[0], password):
             return jsonify({"message": "Login successful", "status": "success"}), 200
         else:
-            return jsonify({"message": "Invalid email or password", "status": "error"}), 401
+            return jsonify({"message": "Invalid username or password", "status": "error"}), 401
     except mysql.connector.Error as err:
         app.logger.error("Error during login: %s", str(err))
         return jsonify({"message": str(err), "status": "error"}), 500
     finally:
         cursor.close()
-        close_db_connection(conn)
+        close_db_connection()
 
 @app.route('/reset-password-request', methods=['POST'])
 def reset_password_request():
@@ -99,7 +87,7 @@ def reset_password_request():
         return jsonify({"message": str(err), "status": "error"}), 500
     finally:
         cursor.close()
-        close_db_connection(conn)
+        close_db_connection()
 
 def send_reset_email(email, token):
     sender_email = "mahla.esa@gmail.com"
@@ -142,8 +130,9 @@ def reset_password():
         return jsonify({"message": str(err), "status": "error"}), 500
     finally:
         cursor.close()
-        close_db_connection(conn)
+        close_db_connection()
 
+# New Routes for Profile Management
 @app.route('/profile', methods=['GET'])
 def get_profile():
     username = request.args.get('username')
@@ -153,16 +142,15 @@ def get_profile():
 
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT username, tel, bio, sports, availability, city FROM users WHERE username = %s", (username,))
+        cursor.execute("SELECT username, tel, bio, sports, availability FROM users WHERE username = %s", (username,))
         user = cursor.fetchone()
         if user:
             return jsonify({
                 "username": user[0],
                 "tel": user[1],
                 "bio": user[2],
-                "sports": json.loads(user[3]),  # Convert JSON string to list
-                "availability": bool(user[4]),
-                "city": user[5]
+                "sports": user[3],
+                "availability": user[4]
             }), 200
         else:
             return jsonify({"message": "User not found", "status": "error"}), 404
@@ -170,7 +158,7 @@ def get_profile():
         return jsonify({"message": str(err), "status": "error"}), 500
     finally:
         cursor.close()
-        close_db_connection(conn)
+        close_db_connection()
 
 @app.route('/profile', methods=['PUT'])
 def update_profile():
@@ -178,9 +166,8 @@ def update_profile():
     username = data['username']
     new_tel = data.get('tel')
     new_bio = data.get('bio')
-    new_sports = json.dumps(data.get('sports')) if data.get('sports') else None  # Convert list to JSON string
+    new_sports = data.get('sports')
     new_availability = data.get('availability')
-    new_city = data.get('city')
 
     conn = get_db_connection()
     if not conn:
@@ -194,17 +181,15 @@ def update_profile():
             cursor.execute("UPDATE users SET bio = %s WHERE username = %s", (new_bio, username))
         if new_sports:
             cursor.execute("UPDATE users SET sports = %s WHERE username = %s", (new_sports, username))
-        if new_availability is not None:
+        if new_availability:
             cursor.execute("UPDATE users SET availability = %s WHERE username = %s", (new_availability, username))
-        if new_city:
-            cursor.execute("UPDATE users SET city = %s WHERE username = %s", (new_city, username))
         conn.commit()
         return jsonify({"message": "Profile updated successfully", "status": "success"}), 200
     except mysql.connector.Error as err:
         return jsonify({"message": str(err), "status": "error"}), 500
     finally:
         cursor.close()
-        close_db_connection(conn)
+        close_db_connection()
 
 @app.route('/profile', methods=['DELETE'])
 def delete_account():
@@ -223,61 +208,7 @@ def delete_account():
         return jsonify({"message": str(err), "status": "error"}), 500
     finally:
         cursor.close()
-        close_db_connection(conn)
-@app.route('/users', methods=['GET'])
-def get_users():
-    conn = get_db_connection()
-    if not conn:
-        return jsonify({"message": "Database connection failed", "status": "error"}), 500
-
-    cursor = conn.cursor()
-    try:
-        cursor.execute("SELECT username, tel, bio, sports, availability, city FROM users")
-        users = cursor.fetchall()
-        return jsonify([{
-            "username": user[0],
-            "tel": user[1] if user[1] else "",
-            "bio": user[2] if user[2] else "",
-            "sports": json.loads(user[3]) if user[3] else [],
-            "availability": bool(user[4]) if user[4] is not None else False,
-            "city": user[5] if user[5] else ""
-        } for user in users]), 200
-    except mysql.connector.Error as err:
-        app.logger.error("Error during fetching users: %s", str(err))
-        return jsonify({"message": str(err), "status": "error"}), 500
-    finally:
-        cursor.close()
-        close_db_connection(conn)
-
-
-@app.route('/user/<username>', methods=['GET'])
-def get_user_by_username(username):
-    conn = get_db_connection()
-    if not conn:
-        return jsonify({"message": "Database connection failed", "status": "error"}), 500
-
-    cursor = conn.cursor()
-    try:
-        cursor.execute("SELECT username, tel, bio, sports, availability, city FROM users WHERE username = %s", (username,))
-        user = cursor.fetchone()
-        if user:
-            return jsonify({
-                "username": user[0],
-                "tel": user[1] if user[1] else "",
-                "bio": user[2] if user[2] else "",
-                "sports": json.loads(user[3]) if user[3] else [],
-                "availability": bool(user[4]) if user[4] is not None else False,
-                "city": user[5] if user[5] else ""
-            }), 200
-        else:
-            return jsonify({"message": "User not found", "status": "error"}), 404
-    except mysql.connector.Error as err:
-        return jsonify({"message": str(err), "status": "error"}), 500
-    finally:
-        cursor.close()
-        close_db_connection(conn)
-
-
+        close_db_connection()
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5005)

@@ -29,17 +29,6 @@ def signup():
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        # Check if the username is already in use
-        cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
-        if cursor.fetchone():
-            return jsonify({"message": "Username already in use", "status": "error"}), 400
-
-        # Check if the email is already in use
-        cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
-        if cursor.fetchone():
-            return jsonify({"message": "Email already in use", "status": "error"}), 400
-
-        # Insert the new user
         cursor.execute("INSERT INTO users (username, password, email) VALUES (%s, %s, %s)", (username, password, email))
         conn.commit()
         return jsonify({"message": "User created successfully", "status": "success"}), 201
@@ -52,7 +41,7 @@ def signup():
 @app.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
-    email = data['email']
+    username = data['username']
     password = data['password']
 
     conn = get_db_connection()
@@ -61,12 +50,12 @@ def login():
 
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT password FROM users WHERE email = %s", (email,))
+        cursor.execute("SELECT password FROM users WHERE username = %s", (username,))
         record = cursor.fetchone()
         if record and bcrypt.check_password_hash(record[0], password):
             return jsonify({"message": "Login successful", "status": "success"}), 200
         else:
-            return jsonify({"message": "Invalid email or password", "status": "error"}), 401
+            return jsonify({"message": "Invalid username or password", "status": "error"}), 401
     except mysql.connector.Error as err:
         app.logger.error("Error during login: %s", str(err))
         return jsonify({"message": str(err), "status": "error"}), 500
@@ -224,6 +213,7 @@ def delete_account():
     finally:
         cursor.close()
         close_db_connection(conn)
+
 @app.route('/users', methods=['GET'])
 def get_users():
     conn = get_db_connection()
@@ -236,11 +226,11 @@ def get_users():
         users = cursor.fetchall()
         return jsonify([{
             "username": user[0],
-            "tel": user[1] if user[1] else "",
-            "bio": user[2] if user[2] else "",
-            "sports": json.loads(user[3]) if user[3] else [],
-            "availability": bool(user[4]) if user[4] is not None else False,
-            "city": user[5] if user[5] else ""
+            "tel": user[1],
+            "bio": user[2],
+            "sports": json.loads(user[3]),  # Convert JSON string to list
+            "availability": bool(user[4]),
+            "city": user[5]
         } for user in users]), 200
     except mysql.connector.Error as err:
         app.logger.error("Error during fetching users: %s", str(err))
@@ -248,7 +238,6 @@ def get_users():
     finally:
         cursor.close()
         close_db_connection(conn)
-
 
 @app.route('/user/<username>', methods=['GET'])
 def get_user_by_username(username):
@@ -263,11 +252,11 @@ def get_user_by_username(username):
         if user:
             return jsonify({
                 "username": user[0],
-                "tel": user[1] if user[1] else "",
-                "bio": user[2] if user[2] else "",
-                "sports": json.loads(user[3]) if user[3] else [],
-                "availability": bool(user[4]) if user[4] is not None else False,
-                "city": user[5] if user[5] else ""
+                "tel": user[1],
+                "bio": user[2],
+                "sports": json.loads(user[3]),  # Convert JSON string to list
+                "availability": bool(user[4]),
+                "city": user[5]
             }), 200
         else:
             return jsonify({"message": "User not found", "status": "error"}), 404
@@ -276,8 +265,6 @@ def get_user_by_username(username):
     finally:
         cursor.close()
         close_db_connection(conn)
-
-
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5005)
